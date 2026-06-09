@@ -31,10 +31,16 @@ class BilibiliDownloader(Downloader, ABC):
             logger.warning("B站 Cookie 未配置，下载可能失败")
             return None
         lines = ["# Netscape HTTP Cookie File\n"]
-        for pair in self._cookie.split("; "):
+        # 修复分割逻辑，支持不带空格的分号分隔，并进行 strip
+        for pair in self._cookie.split(";"):
+            pair = pair.strip()
             if "=" in pair:
                 key, value = pair.split("=", 1)
+                # 记录核心 cookie 供调试（不打印 SESSDATA 等敏感值）
+                if key in ("buvid3", "buvid4", "_uuid"):
+                    logger.debug(f"注入 B站 关键 Cookie: {key}")
                 lines.append(f".bilibili.com\tTRUE\t/\tFALSE\t0\t{key}\t{value}\n")
+        
         tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
         tmp.writelines(lines)
         tmp.close()
@@ -56,10 +62,18 @@ class BilibiliDownloader(Downloader, ABC):
 
         output_path = os.path.join(output_dir, "%(id)s.%(ext)s")
 
+        # 模拟现代浏览器请求头，减少 412 错误
+        headers = {
+            'Referer': 'https://www.bilibili.com',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        }
+
         ydl_opts = {
             'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'outtmpl': output_path,
-            'http_headers': {'Referer': 'https://www.bilibili.com'},
+            'http_headers': headers,
             'postprocessors': [
                 {
                     'key': 'FFmpegExtractAudio',

@@ -2,33 +2,35 @@
 
 import { useTaskStore } from "@/store/taskStore"
 import { useEffect, useState, useRef } from "react"
-import { Play } from "lucide-react"
+import { Play, Download } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {ScrollArea} from "@/components/ui/scroll-area.tsx";
+import { Button } from "@/components/ui/button"
 
 interface Segment {
   start: number
   end: number
   text: string
-
+  speaker?: string
 }
 
 interface Task {
+  id: string
+  audioMeta: {
+    title: string
+  }
   transcript?: {
     segments?: Segment[]
   }
 }
 
 const TranscriptViewer = () => {
-  const getCurrentTask = useTaskStore((state) => state.getCurrentTask)
+  const tasks = useTaskStore((state) => state.tasks)
   const currentTaskId = useTaskStore((state) => state.currentTaskId)
-  const [task, setTask] = useState<Task | null>(null)
+  const task = tasks.find(t => t.id === currentTaskId)
+  
   const [activeSegment, setActiveSegment] = useState<number | null>(null)
   const segmentRefs = useRef<(HTMLDivElement | null)[]>([])
-
-  useEffect(() => {
-    setTask(getCurrentTask())
-  }, [currentTaskId, getCurrentTask])
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60)
@@ -38,19 +40,36 @@ const TranscriptViewer = () => {
 
   const handleSegmentClick = (index: number) => {
     setActiveSegment(index)
-    // Here you could add functionality to play the audio from this segment
   }
 
-  const scrollToSegment = (index: number) => {
-    segmentRefs.current[index]?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    })
+  const handleDownloadTranscript = () => {
+    if (!task?.transcript?.segments) return
+    
+    const fullText = task.transcript.segments
+      .map(s => `[${formatTime(s.start)}] ${s.text}`)
+      .join('\n')
+      
+    const fileName = `${task.audioMeta?.title || 'transcript'}_原文.txt`
+    const blob = new Blob([fullText], { type: 'text/plain;charset=utf-8' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   return (
       <div className="transcript-viewer flex h-full w-full flex-col  rounded-md border bg-white p-4 shadow-sm">
-        <h2 className="mb-4 text-lg font-medium">转写结果</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-medium">转写结果</h2>
+          {task?.transcript?.segments && task.transcript.segments.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={handleDownloadTranscript} className="h-8 px-2">
+              <Download className="mr-1.5 h-4 w-4" />
+              导出文本
+            </Button>
+          )}
+        </div>
         {!task?.transcript?.segments?.length ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">暂无转写内容</div>
         ) : (

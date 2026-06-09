@@ -24,6 +24,7 @@ import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
 import MarkmapEditor from '@/pages/HomePage/components/MarkmapComponent.tsx'
 import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
+import { MarkdownOutline } from '@/components/MarkdownOutline.tsx'
 
 interface VersionNote {
   ver_id: string
@@ -49,6 +50,25 @@ const steps = [
 const remarkPlugins = [gfm, remarkMath]
 const rehypePlugins = [rehypeKatex]
 
+// 辅助函数：从 React 节点中提取纯文本
+const extractTextFromNode = (node: any): string => {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractTextFromNode).join('');
+  if (node && node.props && node.props.children) {
+    return extractTextFromNode(node.props.children);
+  }
+  return '';
+};
+
+// 辅助函数：生成 slug ID
+const generateSlug = (text: string) => {
+  return text
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^\p{L}\p{N}\-_]/gu, '');
+};
+
 /**
  * 构建 ReactMarkdown components 对象，baseURL 用于修正图片路径。
  * 使用函数 + useMemo 避免每次渲染都创建新的函数实例。
@@ -57,6 +77,7 @@ function createMarkdownComponents(baseURL: string) {
   return {
     h1: ({ children, ...props }: any) => (
       <h1
+        id={generateSlug(extractTextFromNode(children))}
         className="text-primary my-6 scroll-m-20 text-3xl font-extrabold tracking-tight lg:text-4xl"
         {...props}
       >
@@ -65,6 +86,7 @@ function createMarkdownComponents(baseURL: string) {
     ),
     h2: ({ children, ...props }: any) => (
       <h2
+        id={generateSlug(extractTextFromNode(children))}
         className="text-primary mt-10 mb-4 scroll-m-20 border-b pb-2 text-2xl font-semibold tracking-tight first:mt-0"
         {...props}
       >
@@ -73,6 +95,7 @@ function createMarkdownComponents(baseURL: string) {
     ),
     h3: ({ children, ...props }: any) => (
       <h3
+        id={generateSlug(extractTextFromNode(children))}
         className="text-primary mt-8 mb-4 scroll-m-20 text-xl font-semibold tracking-tight"
         {...props}
       >
@@ -81,6 +104,7 @@ function createMarkdownComponents(baseURL: string) {
     ),
     h4: ({ children, ...props }: any) => (
       <h4
+        id={generateSlug(extractTextFromNode(children))}
         className="text-primary mt-6 mb-2 scroll-m-20 text-lg font-semibold tracking-tight"
         {...props}
       >
@@ -452,7 +476,8 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                 </div>
               ) : (
               <>
-              <ScrollArea className="min-w-0 flex-1">
+              <ScrollArea className="min-w-0 flex-1 relative">
+                <MarkdownOutline markdown={selectedContent} />
                 <div className="px-2">
                   <VideoBanner
                     audioMeta={currentTask?.audioMeta}
