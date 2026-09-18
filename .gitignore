@@ -340,3 +340,6 @@ get-pip.py
 
 # 工具工作区
 .workbuddy/
+
+# 运维笔记（含口令，不入库）
+docs/运维手册.md
