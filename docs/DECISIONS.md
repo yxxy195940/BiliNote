@@ -14,6 +14,20 @@
 | Python | 后端用项目内 `backend/myvenv`（3.12），不碰系统环境 |
 | 前端 | React 19 + Vite + **Tailwind v4**；移动端断点 767px，走 JS 分支 |
 | 模型权重 | `backend/models/whisper/`：turbo / medium / small / tiny（tiny 与 medium 不完整） |
+| Agent 环境 | Windows 原生 agent + 项目在 WSL2；经实测**无需**切换到 WSL agent |
+
+---
+
+## 2026-09-19 Agent 运行环境：保持 Windows 原生，项目留在 WSL2
+
+**结论**：Codex agent 继续跑 Windows 原生（PowerShell），项目文件继续留在 WSL2 文件系统，两者都不迁移。
+
+- 官方 WSL 指南里会促使人切换的两个警告，在本机**均不成立**：WSL 是 **version 2**（不是已停止支持的 WSL1）；Windows git（`D:\Code\Git\cmd\git.exe`）能正常识别 UNC 仓库（`git -C \\wsl.localhost\... rev-parse --git-dir` 返回 `.git`）。
+- 审查面板（Review）在 UNC 仓库上可正常显示改动，已实测确认。
+- `wsl.exe` 调用开销实测约 **0.08 秒/次**，可忽略；真正的瓶颈是目录层数（每层一次 RTT），与文件大小无关。
+- **反面警告（重要）**：不要照搬指南里「项目放 Windows 盘、WSL 通过 `/mnt/<drive>/...` 访问」的建议。本项目**在 WSL 内运行**（systemd 单元 + `backend/myvenv` + GPU 加速库 + `node_modules`），路径迁移会连锁破坏 systemd 配置与 GPU 环境，且 `/mnt/*` 跨文件系统 I/O 对 venv 和 node_modules 极慢。
+- 保持现状的已知小代价：PowerShell → WSL 传参需转义。heredoc（`<<'EOF'`）会被拆开（改用临时消息文件）；`$var` 有时不展开；管道须放进 `bash -lc '...'` 引号内；路径中的 `[OI]` 会被当通配符。
+- 若将来确实被上述摩擦困扰：Settings 里把 agent 切到 WSL + 重启应用即可，可逆；但无论选哪边都**不迁移项目路径**。
 
 ---
 
