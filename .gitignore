@@ -327,3 +327,16 @@ cython_debug/
 # FFmpeg 构建文件（不应该提交到仓库）
 ffmpeg*/
 ffmpg*/
+# 本地虚拟环境（可用 requirements.txt 重建，不应入库）
+/backend/myvenv/
+myvenv/
+
+# 本地凭据与临时文件
+test_cookie.txt
+get-pip.py
+
+# 本地数据库残留
+/backend/app/db/bili_note.db
+
+# 工具工作区
+.workbuddy/
