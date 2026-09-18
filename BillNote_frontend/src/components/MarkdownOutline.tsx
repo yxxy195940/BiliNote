@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronRight, ChevronLeft, List } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/useIsMobile.ts';
 
 interface OutlineItem {
   id: string;
@@ -14,6 +15,7 @@ interface MarkdownOutlineProps {
 
 export const MarkdownOutline: React.FC<MarkdownOutlineProps> = ({ markdown }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const isMobile = useIsMobile();
 
   const outline = useMemo(() => {
     const lines = markdown.split('\n');
@@ -51,20 +53,29 @@ export const MarkdownOutline: React.FC<MarkdownOutlineProps> = ({ markdown }) =>
   return (
     <div
       className={cn(
-        "fixed right-0 top-1/4 z-50 flex h-3/4 max-h-[600px] transition-all duration-300 ease-in-out",
-        isExpanded ? "translate-x-0" : "translate-x-[calc(100%-2rem)]"
+        "fixed right-0 top-20 z-50 flex max-h-[70vh] transition-all duration-300 ease-in-out",
+        isExpanded ? (isMobile ? "w-[min(18rem,82vw)]" : "w-[18rem]") : "w-8",
+        !isMobile && "h-3/4 max-h-[600px]",
       )}
-      onMouseEnter={() => setIsExpanded(true)}
-      onMouseLeave={() => setIsExpanded(false)}
+      onMouseEnter={() => !isMobile && setIsExpanded(true)}
+      onMouseLeave={() => !isMobile && setIsExpanded(false)}
     >
       {/* Trigger area when collapsed */}
-      <div className="flex h-12 w-8 cursor-pointer items-center justify-center rounded-l-md border border-r-0 border-border bg-background shadow-md">
+      <button
+        type="button"
+        aria-label={isExpanded ? '收起目录大纲' : '展开目录大纲'}
+        className="border-border bg-background flex h-12 w-8 shrink-0 cursor-pointer items-center justify-center rounded-l-md border border-r-0 shadow-md"
+        onClick={() => isMobile && setIsExpanded((expanded) => !expanded)}
+      >
         {isExpanded ? <ChevronRight size={16} /> : <List size={16} className="text-muted-foreground" />}
-      </div>
+      </button>
 
       {/* Sidebar content */}
-      <div className="w-64 overflow-y-auto rounded-l-lg border border-r-0 border-border bg-background/95 p-4 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <h3 className="mb-4 text-sm font-semibold text-foreground">目录大纲</h3>
+      <div className={cn(
+        "border-border bg-background/95 supports-[backdrop-filter]:bg-background/60 w-64 max-w-[72vw] overflow-y-auto rounded-l-lg border border-r-0 p-4 shadow-lg backdrop-blur",
+        !isExpanded && 'hidden',
+      )}>
+        <h3 className="text-foreground mb-4 text-sm font-semibold">目录大纲</h3>
         <ul className="space-y-2">
           {outline.map((item) => (
             <li
@@ -76,6 +87,8 @@ export const MarkdownOutline: React.FC<MarkdownOutlineProps> = ({ markdown }) =>
                 if (element) {
                   element.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
+                // 手机上选中后自动收起，避免挡住正文
+                if (isMobile) setIsExpanded(false);
               }}
             >
               <span className="text-muted-foreground hover:text-primary line-clamp-2 cursor-pointer transition-colors hover:underline">
