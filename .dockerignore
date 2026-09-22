@@ -20,10 +20,11 @@ backend/note_results
 backend/bin/
 
 # 依赖和构建缓存
-node_modules/
-__pycache__/
+**/node_modules/
+**/__pycache__/
 *.py[cod]
-dist/
+**/dist/
+backend/myvenv/
 build/
 *.tar
 *.egg-info/

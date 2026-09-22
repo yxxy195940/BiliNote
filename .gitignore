@@ -343,3 +343,11 @@ get-pip.py
 
 # 运维笔记（含口令，不入库）
 docs/运维手册.md
+
+# 本地备份残留
+*.bak
+
+# 运行时配置（CookieConfigManager 会把各平台 cookie 明文写进来，不入库）
+/config/*.json
+# 个人数据脚本（含本地笔记归档映射、视频 ID，不入库）
+backend/scripts/import_history.py

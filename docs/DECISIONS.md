@@ -86,10 +86,61 @@
 
 ---
 
+## 2026-09-19 移动端 ⓘ 提示按钮 & 笔记格式默认值
+
+**背景**：移动端首页所有「感叹号」说明按钮点击无反应，PC 端鼠标悬停却正常。
+
+**根因**：Radix Tooltip 只在 `onPointerMove` 里判断，遇到触摸指针直接 return；说明图标本身是裸 `<svg>`，也不在键盘 Tab 序列里。移动端没有任何触发路径。
+
+**结论**：新增 `BillNote_frontend/src/components/InfoTip.tsx` —— 受控 `Tooltip` + 真正的 `<button>` 触发元素：触摸点按自行 toggle、鼠标端仍是悬停展开、键盘聚焦可开。`NoteForm.tsx` 的 `SectionHeader` 统一改用它（首页的 ⓘ 都出自这里）。
+
+- 顺带：`NoteForm.tsx` 的 `format` 初值从 `[]` 改为 `['toc', 'link', 'summary']`，即「目录 / 原片跳转 / AI 总结」默认勾选。
+- 注意 `MarkdownHeader.tsx` / `NoteHistory.tsx` 里还有 Radix Tooltip，但它们绑定的都是可点击的 `<Button>`（悬停只是补充说明），不属于「点了没反应」，未改动。
+
+## 2026-09-19 笔记生成失败时展示「卡在哪一环」
+
+**结论**：后端在状态文件里记录阶段，前端失败页展示「阶段 + 原始报错」。
+
+- `app/services/note.py` 新增 `self._current_phase`，`_update_status` 时写入 `phase` / `phase_desc`，失败分支把阶段一并落盘。**坑**：失败会被写两次（`_handle_exception` 和 `generate` 的 `except`），只有 `SUCCESS` 才允许清空阶段，否则第二次写会把 `phase` 冲成 `null`。
+- `app/routers/note.py` 的 `/task_status` 失败分支保持 `code=500`（不破坏旧契约），`data` 补 `{status, phase, phase_desc, task_id}`。
+- 前端：`utils/request.ts` 加 `skipErrorToast` 让轮询静默；`useTaskPolling.ts` 把 `message/phase/phase_desc` 写回任务，并把 `code === -1`（纯网络抖动）当作 `continue`，不再误判任务失败；`store/taskStore` 补 `taskPhaseLabels` / `taskFailureText`；`MarkdownViewer.tsx` 失败页渲染「笔记生成失败（下载中）」+ 可滚动报错原文。
+- 实测：提交一个必然失败的 YouTube 任务，接口返回 `code=500`、`phase=DOWNLOADING`、`phase_desc=下载中`。
+
+## 2026-09-19 YouTube 下载器接入 Cookie
+
+**背景**：YouTube 报 `Sign in to confirm you're not a bot`。
+
+**结论**：`YoutubeDownloader` 读 `config/downloader.json` 的 `youtube.cookie`，用共享的 `write_netscape_cookie_file()`（`app/services/cookie_manager.py`，由 B 站私有实现提取而来）生成 Netscape 临时文件，注入 `ydl_opts['cookiefile']`；`YouTubeSubtitleFetcher(cookie=...)` 给 InnerTube session 设 Cookie 头，`download_subtitles` 一并传入。未配置 cookie 时只记 warning，不影响其他平台。
+
+- 离线校验（无网也能验）：yt-dlp 能从生成的 cookiefile 解析出 23 条 cookie，含 `SID` / `HSID` / `SSID` / `APISID` / `SAPISID` / `__Secure-1PSID` / `LOGIN_INFO`；字幕 fetcher 有 cookie 时发出 `Cookie` 头、无 cookie 时不发。
+- **cookie 只解机器人校验，解不了网络层问题**。本机 YouTube 失败的真实原因见下方踩坑清单。
+
+## 2026-09-19 WSL 代理打通 YouTube 下载（网络层已解决）
+
+**背景**：YouTube 任务在 `DOWNLOADING` 阶段失败，报 `[youtube] Unable to download API page: [Errno 101] Network is unreachable`。
+
+**结论**：systemd 单元 `bilinote-backend` 只配了 `no_proxy`，**没有** `http_proxy` / `https_proxy` / `ALL_PROXY`；而 **systemd 服务不继承 shell 里的环境变量**，所以 yt-dlp 在直连被墙的 YouTube。补 drop-in 注入 `http://127.0.0.1:7892` 后网络层打通——报错变为 `Sign in to confirm you're not a bot`（反爬，属另一层问题）。
+
+- **改法**：`/etc/systemd/system/bilinote-backend.service.d/override.conf` 加三个 `Environment=`（http_proxy / https_proxy / ALL_PROXY），再 `daemon-reload` + `restart`。
+- **不做 `autoProxy=true`**：会把 WSL 的出网绑到 Windows 系统代理开关上，还可能污染回环、让本机服务报 502；粒度也做不到「只让 YouTube 走代理」。
+- **完整方案、Clash 规则写法、排障清单**：见 [`docs/WSL-网络代理配置.md`](./WSL-网络代理配置.md)。
+
+**后续（同日解决）**：网络层通了之后暴露出的 `Sign in to confirm you're not a bot` 属 cookie 问题——用浏览器扩展 **Get cookies.txt LOCALLY** 重新导出 YouTube cookie 粘贴到「设置 → 下载器」，即刻恢复，实测任务 `29407d60` 全链路通过。**结论：YouTube 报 bot check = cookie 票据过期，重新导出粘贴即可，别动代码。** 细节与遗留观察（`cookie_manager` 强行覆盖 cookie 域）见 [`docs/WSL-网络代理配置.md`](./WSL-网络代理配置.md) 第九节。
+
+---
+
 ## 本机环境踩坑清单
 
-- `backend/myvenv/bin/pip` 的 shebang 指向已失效的 `/mnt/d/Code/project/...`，**必须**用 `myvenv/bin/python -m pip`。
+- **前端服务跑的是 `vite preview`（生产 `dist/`），不是 dev server**。改完 `src/` 必须 `pnpm build`（要 `NODE_OPTIONS=--max-old-space-size=6144`，否则 OOM）再 `sudo systemctl restart bilinote-frontend`，否则用户看到的一直是旧包 ——「改了没生效」多半是这个。判断是否已部署：比对 `dist/index.html` 的 mtime 与源文件 mtime。
+- 后端 `WorkingDirectory` 是 `backend/`，所以 `CookieConfigManager` 的默认路径 `config/downloader.json` 实际指向 `backend/config/downloader.json`；根目录那个 `config/downloader.json` 是空文件，别看错。
+- `app/services/note.py` 曾在服务运行期间被手工编辑，`markdown_cache_file.stem.split("_")[0]` 那行丢过缩进导致 `IndentationError`。改完先跑 `myvenv/bin/python -m compileall app` 再重启。
+- `eth5`（Windows 侧 `QingyunLite Tunnel`）**会整个消失**：2026-09-19 05:30 时 `ip -br addr` 只剩 `eth2`（192.168.2.x 直连 LAN）。此时 bilibili / baidu 正常（200），但 YouTube / Google 完全不通（curl 超时；DNS 把 `www.youtube.com` 解成 `2001::1` 这种无效 IPv6）。排查方法：先 `ip -br addr` 看有没有 `eth5`，没有就别怀疑代码。WSL 是镜像网络模式（WSL 里的 `127.0.0.1` 就是 Windows 本机）。**注**：「Windows 侧没有任何代理在监听」是 05:30 那个时点的观测；此后 QingyunLite 恢复监听 7892，代理方案见 [`docs/WSL-网络代理配置.md`](./WSL-网络代理配置.md)。
+- 既有问题（未处理）：`app/downloaders/douyin_downloader.py:117` 有裸 `print(self.headers_config)`，每次都会把**抖音 cookie 完整打进 stdout 日志**，属于敏感信息泄漏 + 日志噪音。
+
+- `backend/myvenv/bin/` 下脚本的 shebang 曾指向已失效的 `/mnt/d/Code/project/...`，2026-09-19 已修为项目真实路径，`myvenv/bin/pip` 可直接用（保险起见也可写 `myvenv/bin/python -m pip`）。
 - `app/routers/config.py`、`app/services/note.py`、`app/transcriber/transcriber_provider.py` 是 **CRLF** 行尾，`apply_patch` 上下文匹配会失败；先删文件再以 LF 重建。
 - PowerShell → WSL 传参有引号陷阱：管道（如 `| tail`）要放在 `bash -lc '...'` 的引号内；`$var` 有时不展开，优先直接写死路径。
 - 全仓递归查找很慢（`BillNote_frontend` 4.6 万文件 / `backend` 3.7 万文件），一律限定 path 并跳过 `node_modules/ .git/ __pycache__/ dist/ build/`。
 - 硬约束：不修改系统全局环境（如 `/etc/environment`）；高风险操作先停下确认。
+- WSL 出网走 `eth5`（对应 Windows 侧 `QingyunLite Tunnel`），HTTPS 会**间歇性**卡死（同一域名可能一个 0.4 秒通、下一个 20 秒超时）。a6api 需在代理里加**直连/绕过规则**；排查时先隔几分钟重试再下结论。
+- ~~别加 `HTTPS_PROXY` 指向 `127.0.0.1:7892`（实测反而失败）~~ → **此结论已被 2026-09-19 的实测推翻，作废**。当时失败的前置条件是 QingyunLite 没在跑（Windows 侧 7892 无监听），与代理变量本身无关。现在 `127.0.0.1:7892` 在 WSL 内可达，后端已通过 systemd drop-in 注入代理并打通 YouTube 下载的网络层。方案与判据见 [`docs/WSL-网络代理配置.md`](./WSL-网络代理配置.md)。
