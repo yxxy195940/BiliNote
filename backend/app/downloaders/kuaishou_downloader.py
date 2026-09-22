@@ -21,7 +21,8 @@ class KuaiShouDownloader(Downloader, ABC):
             video_url: str,
             output_dir: Union[str, None] = None,
             quality: str = "fast",
-            need_video: Optional[bool] = False
+            need_video: Optional[bool] = False,
+            skip_download: bool = False
     ) -> AudioDownloadResult:
         if output_dir is None:
             output_dir = get_data_dir()
@@ -50,28 +51,30 @@ class KuaiShouDownloader(Downloader, ABC):
                 raw_info={
                     'tags': ','.join(tag['name'] for tag in video_raw_info.get('tags', []) if tag.get('name'))
                 },
+                publish_date=photo_info.get('timestamp'),
                 video_path=mp4_path
             )
 
-        # 下载 mp4 视频
-        resp = requests.get(photo_info['photoUrl'], stream=True)
-        if resp.status_code == 200:
-            with open(mp4_path, "wb") as f:
-                for chunk in resp.iter_content(1024 * 1024):
-                    f.write(chunk)
-        else:
-            raise Exception(f"视频下载失败: {resp.status_code}")
+        if not skip_download:
+            # 下载 mp4 视频
+            resp = requests.get(photo_info['photoUrl'], stream=True)
+            if resp.status_code == 200:
+                with open(mp4_path, "wb") as f:
+                    for chunk in resp.iter_content(1024 * 1024):
+                        f.write(chunk)
+            else:
+                raise Exception(f"视频下载失败: {resp.status_code}")
 
-        # 使用 ffmpeg 转换为 mp3
-        try:
-            subprocess.run([
-                "ffmpeg", "-y", "-i", mp4_path, "-vn", "-acodec", "libmp3lame", mp3_path
-            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except subprocess.CalledProcessError:
-            raise Exception("ffmpeg 转换 MP3 失败")
+            # 使用 ffmpeg 转换为 mp3
+            try:
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", mp4_path, "-vn", "-acodec", "libmp3lame", mp3_path
+                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except subprocess.CalledProcessError:
+                raise Exception("ffmpeg 转换 MP3 失败")
 
         return AudioDownloadResult(
-            file_path=mp3_path,
+            file_path=mp3_path if not skip_download else "",
             title=photo_info['caption'],
             duration=photo_info['duration'],
             cover_url=photo_info['coverUrl'],
@@ -80,7 +83,8 @@ class KuaiShouDownloader(Downloader, ABC):
             raw_info={
                 'tags': ','.join(tag['name'] for tag in video_raw_info.get('tags', []) if tag.get('name'))
             },
-            video_path=mp4_path
+            publish_date=photo_info.get('timestamp'),
+            video_path=mp4_path if not skip_download or os.path.exists(mp4_path) else None
         )
 
     def download_video(

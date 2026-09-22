@@ -1,6 +1,37 @@
 import json
+import logging
+import tempfile
 from pathlib import Path
 from typing import Optional, Dict
+
+logger = logging.getLogger(__name__)
+
+
+def write_netscape_cookie_file(cookie: Optional[str], domain: str, platform: str = "") -> Optional[str]:
+    """
+    把浏览器里复制的 Cookie 字符串写成 yt-dlp 可用的 Netscape 格式临时文件。
+
+    :param cookie: 形如 "a=1; b=2" 的 Cookie 字符串
+    :param domain: Cookie 生效域名，如 .bilibili.com / .youtube.com
+    :param platform: 仅用于日志
+    :return: 临时文件路径；未配置 Cookie 时返回 None
+    """
+    if not cookie:
+        return None
+
+    lines = ["# Netscape HTTP Cookie File\n"]
+    # 支持带/不带空格的分号分隔，并进行 strip
+    for pair in cookie.split(";"):
+        pair = pair.strip()
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+            lines.append(f"{domain}\tTRUE\t/\tFALSE\t0\t{key}\t{value}\n")
+
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+    tmp.writelines(lines)
+    tmp.close()
+    logger.info("已生成 %s Netscape Cookie 文件: %s (条目: %d)", platform or domain, tmp.name, len(lines) - 1)
+    return tmp.name
 
 
 class CookieConfigManager:

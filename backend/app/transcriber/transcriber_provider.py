@@ -29,7 +29,8 @@ if platform.system() == "Darwin":
 
 logger.info('初始化转录服务提供器')
 
-# 转录器单例缓存
+# 转录器单例缓存。value 为 (实例, 参数签名)，
+# 参数变化（例如在设置页把 whisper 换成 large-v3-turbo）时重建，避免一直用旧模型。
 _transcribers = {
     TranscriberType.FAST_WHISPER: None,
     TranscriberType.MLX_WHISPER: None,
@@ -40,15 +41,20 @@ _transcribers = {
 
 # 公共实例初始化函数
 def _init_transcriber(key: TranscriberType, cls, *args, **kwargs):
-    if _transcribers[key] is None:
-        logger.info(f'创建 {cls.__name__} 实例: {key}')
-        try:
-            _transcribers[key] = cls(*args, **kwargs)
-            logger.info(f'{cls.__name__} 创建成功')
-        except Exception as e:
-            logger.error(f"{cls.__name__} 创建失败: {e}")
-            raise
-    return _transcribers[key]
+    signature = (args, tuple(sorted(kwargs.items())))
+    cached = _transcribers.get(key)
+    if cached is not None and cached[1] == signature:
+        return cached[0]
+
+    logger.info(f'创建 {cls.__name__} 实例: {key} {signature[1]}')
+    try:
+        instance = cls(*args, **kwargs)
+    except Exception as e:
+        logger.error(f"{cls.__name__} 创建失败: {e}")
+        raise
+    _transcribers[key] = (instance, signature)
+    logger.info(f'{cls.__name__} 创建成功')
+    return instance
 
 # 各类型获取方法
 def get_groq_transcriber():
@@ -90,7 +96,8 @@ def get_transcriber(transcriber_type="fast-whisper", model_size="base", device="
         logger.warning(f'未知转录器类型 "{transcriber_type}"，默认使用 fast-whisper')
         transcriber_enum = TranscriberType.FAST_WHISPER
 
-    whisper_model_size = os.environ.get("WHISPER_MODEL_SIZE", model_size)
+    # 设置页写入的配置由调用方通过 model_size 传入，这里只在调用方没给值时才看环境变量
+    whisper_model_size = model_size or os.environ.get("WHISPER_MODEL_SIZE", "base")
 
     if transcriber_enum == TranscriberType.FAST_WHISPER:
         return get_whisper_transcriber(whisper_model_size, device=device)

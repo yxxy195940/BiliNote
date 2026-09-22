@@ -212,7 +212,8 @@ class DouyinDownloader(Downloader):
             video_url: str,
             output_dir: Union[str, None] = None,
             quality: DownloadQuality = "fast",
-            need_video: Optional[bool] = False
+            need_video: Optional[bool] = False,
+            skip_download: bool = False,
     ) -> AudioDownloadResult:
         try:
             print(
@@ -231,12 +232,15 @@ class DouyinDownloader(Downloader):
                 "id": video_data['aweme_detail']['aweme_id'],
                 "ext": "mp3",
             }
-            url = video_data['aweme_detail']['music']['play_url']['uri']
-            # 下载音频
-            audio_data = requests.get(url)
-            with open(output_path, 'wb') as f:
-                f.write(audio_data.content)
-            print(url)
+            
+            if not skip_download:
+                url = video_data['aweme_detail']['music']['play_url']['uri']
+                # 下载音频
+                audio_data = requests.get(url)
+                with open(output_path, 'wb') as f:
+                    f.write(audio_data.content)
+                print(url)
+                
             tags = []
             for tag in video_data['aweme_detail']['video_tag']:
                 if tag['tag_name']:
@@ -253,6 +257,7 @@ class DouyinDownloader(Downloader):
                 raw_info={
                     'tags': video_data['aweme_detail']['caption'] + ''.join(tags),
                 },
+                publish_date=video_data['aweme_detail'].get('create_time'),
                 video_path=None  # ❗音频下载不包含视频路径
             )
         except Exception as e:

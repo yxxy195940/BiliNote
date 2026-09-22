@@ -19,7 +19,9 @@ WORKDIR /app
 
 # 先复制 requirements.txt 利用层缓存
 COPY ./backend/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -i ${PIP_INDEX} -r requirements.txt
+COPY ./backend/clear_execstack.py /app/clear_execstack.py
+RUN pip install --no-cache-dir -i ${PIP_INDEX} -r requirements.txt && \
+    python3 /app/clear_execstack.py
 
 # 再复制应用代码（频繁变动不影响 pip 缓存层）
 COPY ./backend /app

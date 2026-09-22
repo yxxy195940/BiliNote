@@ -11,4 +11,5 @@ class VideoTask(Base):
     video_id = Column(String, nullable=False)
     platform = Column(String, nullable=False)
     task_id = Column(String, unique=True, nullable=False)
+    publish_date = Column(Integer, nullable=True) # 视频发布日期时间 (Unix timestamp)
     created_at = Column(DateTime, server_default=func.now())

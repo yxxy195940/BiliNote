@@ -3,8 +3,8 @@ from faster_whisper import WhisperModel
 from app.decorators.timeit import timeit
 from app.models.transcriber_model import TranscriptSegment, TranscriptResult
 from app.transcriber.base import Transcriber
-from app.utils.env_checker import is_cuda_available, is_torch_installed
 from app.utils.logger import get_logger
+from app.utils.nvidia_libs import is_gpu_acceleration_ready
 from app.utils.path_helper import get_model_dir
 
 from events import transcription_finished
@@ -60,34 +60,42 @@ class WhisperTranscriber(Transcriber):
             )
             logger.info("模型下载完成")
 
-        self.model = WhisperModel(
-            model_size_or_path=model_path,
-            device=self.device,
-            compute_type=self.compute_type,
-            download_root=model_dir
-        )
-    @staticmethod
-    def is_torch_installed() -> bool:
         try:
-            import torch
-            return True
-        except ImportError:
-            return False
-
+            self.model = WhisperModel(
+                model_size_or_path=model_path,
+                device=self.device,
+                compute_type=self.compute_type,
+                download_root=model_dir
+            )
+        except Exception as exc:
+            # 显卡环境不完整（缺 cuDNN、显存不足、驱动不匹配等）时不能让整个笔记生成失败，
+            # 直接降级到 CPU + int8 继续跑。
+            if self.device != "cuda":
+                raise
+            logger.warning(f"GPU 转写初始化失败，自动回退到 CPU：{exc}")
+            self.device = "cpu"
+            self.compute_type = "int8"
+            self.model = WhisperModel(
+                model_size_or_path=model_path,
+                device=self.device,
+                compute_type=self.compute_type,
+                download_root=model_dir
+            )
     @staticmethod
     def is_cuda() -> bool:
+        """能否真正用 GPU 跑转写。
+
+        这里不看 torch（项目没装），而是直接检查 CTranslate2 + NVIDIA 加速库：
+        库加载失败、检测不到显卡、显存不可用时都返回 False，由调用方退回 CPU。
+        """
         try:
-            if is_cuda_available():
+            if is_gpu_acceleration_ready():
                 print(" CUDA 可用，使用 GPU")
                 return True
-            elif is_torch_installed():
-                print(" 只装了 torch，但没有 CUDA，用 CPU")
-                return False
-            else:
-                print(" 还没有安装 torch，请先安装")
-                return False
-
-        except ImportError:
+            print(" 未检测到可用的 CUDA 加速环境，使用 CPU")
+            return False
+        except Exception as exc:
+            print(f" CUDA 检测异常，使用 CPU：{exc}")
             return False
 
     @timeit
@@ -125,4 +133,3 @@ class WhisperTranscriber(Transcriber):
         transcription_finished.send({
             "file_path": video_path,
         })
-

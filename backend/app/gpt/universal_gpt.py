@@ -1,5 +1,5 @@
 from app.gpt.base import GPT
-from app.gpt.prompt_builder import generate_base_prompt
+from app.gpt.prompt_builder import generate_base_prompt, note_styles
 from app.models.gpt_model import GPTSource
 import os
 import hashlib
@@ -21,6 +21,7 @@ class UniversalGPT(GPT):
         self.client = client
         self.model = model
         self.temperature = temperature
+        self._default_temperature = temperature
         self.screenshot = False
         self.link = False
         self.max_request_bytes = int(os.getenv("OPENAI_MAX_REQUEST_BYTES", str(45 * 1024 * 1024)))
@@ -87,8 +88,23 @@ class UniversalGPT(GPT):
         import json
         return len(json.dumps(messages, ensure_ascii=False).encode("utf-8"))
 
-    def _build_merge_messages(self, partials: list) -> list:
-        merge_text = MERGE_PROMPT + "\n\n" + "\n\n---\n\n".join(partials)
+    @staticmethod
+    def _style_density_hint(style: str | None) -> str:
+        """归并阶段注入风格密度约束，防止多轮归并把精简笔记越并越臃肿。"""
+        if not style:
+            return ""
+        label = next((s.get("label") for s in note_styles if s.get("value") == style), style)
+        return (
+            f"- 合并结果必须保持「{label}」风格的信息密度："
+            "去重时优先删除例证展开与重复表述，不得因合并而膨胀"
+        )
+
+    def _build_merge_messages(self, partials: list, style: str | None = None) -> list:
+        style_hint = self._style_density_hint(style)
+        merge_text = MERGE_PROMPT
+        if style_hint:
+            merge_text += "\n" + style_hint
+        merge_text += "\n\n" + "\n\n---\n\n".join(partials)
         # 合并阶段没有图片，直接用 string content 兼容非多模态模型（issue #282）
         return [{
             "role": "user",
@@ -205,9 +221,9 @@ class UniversalGPT(GPT):
             raise last_exc
         raise RuntimeError("chat completion failed without exception")
 
-    def _merge_partials(self, partials: list, checkpoint_key: str | None, source_signature: str | None) -> str:
+    def _merge_partials(self, partials: list, checkpoint_key: str | None, source_signature: str | None, style: str | None = None) -> str:
         def build_messages(texts, *_args, **_kwargs):
-            return self._build_merge_messages(texts)
+            return self._build_merge_messages(texts, style=style)
 
         merge_chunker = RequestChunker(
             lambda *_args, **_kwargs: [],
@@ -244,6 +260,9 @@ class UniversalGPT(GPT):
     def summarize(self, source: GPTSource) -> str:
         self.screenshot = source.screenshot
         self.link = source.link
+        # 精简是收敛型任务，低温输出更稳定；其余风格沿用初始化温度（默认 0.7）。
+        # 必须放在 _build_source_signature 之前，保证 checkpoint 签名与实际请求温度一致。
+        self.temperature = 0.4 if source.style == 'minimal' else self._default_temperature
         source.segment = self.ensure_segments_type(source.segment)
         checkpoint_key = source.checkpoint_key
         source_signature = self._build_source_signature(source) if checkpoint_key else None
@@ -308,7 +327,7 @@ class UniversalGPT(GPT):
             if checkpoint_key:
                 self._clear_checkpoint(checkpoint_key)
             return partials[0]
-        merged = self._merge_partials(partials, checkpoint_key, source_signature)
+        merged = self._merge_partials(partials, checkpoint_key, source_signature, style=source.style)
         if checkpoint_key:
             self._clear_checkpoint(checkpoint_key)
         return merged

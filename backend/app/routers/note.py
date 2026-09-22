@@ -50,6 +50,8 @@ class VideoRequest(BaseModel):
     video_understanding: Optional[bool] = False
     video_interval: Optional[int] = 0
     grid_size: Optional[list] = []
+    # 仅提取原文：跳过 LLM 总结，直接输出转写原文
+    transcript_only: Optional[bool] = False
     # 客户端（如浏览器插件）已经在用户浏览器里抓到字幕，直接传给后端复用，
     # 跳过 download_subtitles 和音频转写。形如：
     #   {"language": "zh", "full_text": "...", "segments": [{"start","end","text"}, ...]}
@@ -66,6 +68,17 @@ class VideoRequest(BaseModel):
                                 message=NoteErrorEnum.PLATFORM_NOT_SUPPORTED.message)
 
         return v
+
+
+class TextRequest(BaseModel):
+    text_content: str
+    title: Optional[str] = None
+    model_name: str
+    provider_id: str
+    style: Optional[str] = None
+    extras: Optional[str] = None
+    task_id: Optional[str] = None
+    transcript_only: Optional[bool] = False
 
 
 NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
@@ -115,10 +128,11 @@ def _persist_prefetched_transcript(task_id: str, transcript: dict) -> None:
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
                   link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
                   _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
-                  video_interval=0, grid_size=[]
+                  video_interval=0, grid_size=[], transcript_only: bool = False
                   ):
 
-    if not model_name or not provider_id:
+    # 仅提取原文模式不需要模型/供应商
+    if not transcript_only and (not model_name or not provider_id):
         raise HTTPException(status_code=400, detail="请选择模型和提供者")
 
     def _execute_note_task():
@@ -137,11 +151,47 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             video_understanding=video_understanding,
             video_interval=video_interval,
             grid_size=grid_size,
+            transcript_only=transcript_only,
         )
 
     logger.info(f"任务进入执行队列 (task_id={task_id})")
     note = task_serial_executor.run(_execute_note_task)
     logger.info(f"Note generated: {task_id}")
+    if not note or not note.markdown:
+        logger.warning(f"任务 {task_id} 执行失败，跳过保存")
+        return
+    save_note_to_file(task_id, note)
+
+    # 自动建立向量索引（用于 AI 问答），失败不影响笔记生成
+    try:
+        from app.services.vector_store import VectorStoreManager
+        VectorStoreManager().index_task(task_id)
+    except Exception as e:
+        logger.warning(f"向量索引失败（不影响笔记）: {e}")
+
+
+def run_text_note_task(task_id: str, text_content: str, model_name: str = None, provider_id: str = None,
+                       title: str = None, style: str = None, extras: str = None,
+                       transcript_only: bool = False):
+    # 仅提取原文模式不需要模型/供应商
+    if not transcript_only and (not model_name or not provider_id):
+        raise HTTPException(status_code=400, detail="请选择模型和提供者")
+
+    def _execute_text_note():
+        return NoteGenerator().generate_text_note(
+            text_content=text_content,
+            task_id=task_id,
+            model_name=model_name,
+            provider_id=provider_id,
+            title=title,
+            style=style,
+            extras=extras,
+            transcript_only=transcript_only,
+        )
+
+    logger.info(f"文本整理任务进入执行队列 (task_id={task_id})")
+    note = task_serial_executor.run(_execute_text_note)
+    logger.info(f"Text note generated: {task_id}")
     if not note or not note.markdown:
         logger.warning(f"任务 {task_id} 执行失败，跳过保存")
         return
@@ -210,7 +260,28 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
 
         background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
                                   data.screenshot, data.model_name, data.provider_id, data.format, data.style,
-                                  data.extras, data.video_understanding, data.video_interval, data.grid_size)
+                                  data.extras, data.video_understanding, data.video_interval, data.grid_size,
+                                  data.transcript_only)
+        return R.success({"task_id": task_id})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate_text_note")
+def generate_text_note(data: TextRequest, background_tasks: BackgroundTasks):
+    try:
+        if data.task_id:
+            task_id = data.task_id
+            logger.info(f"文本整理重试模式，复用已有 task_id={task_id}")
+        else:
+            task_id = str(uuid.uuid4())
+
+        # 统一先写入 PENDING，表示已进入队列等待串行执行
+        NoteGenerator()._update_status(task_id, TaskStatus.PENDING)
+
+        background_tasks.add_task(run_text_note_task, task_id, data.text_content, data.model_name,
+                                  data.provider_id, data.title, data.style, data.extras,
+                                  data.transcript_only)
         return R.success({"task_id": task_id})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -249,7 +320,17 @@ def get_task_status(task_id: str):
                 })
 
         if status == TaskStatus.FAILED.value:
-            return R.error(message or "任务失败", code=500)
+            # 仍然用 code=500 保持旧契约，但附带失败阶段，前端可以提示「卡在哪一环」
+            return R.error(
+                message or "任务失败",
+                code=500,
+                data={
+                    "status": status,
+                    "phase": status_content.get("phase"),
+                    "phase_desc": status_content.get("phase_desc"),
+                    "task_id": task_id,
+                },
+            )
 
         # 处理中状态
         return R.success({

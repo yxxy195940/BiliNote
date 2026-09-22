@@ -224,36 +224,46 @@ async def sys_health():
 async def sys_check():
     return R.success()
 
-
 @router.get("/deploy_status")
 async def deploy_status():
-    """返回部署监控所需的所有状态信息"""
-    import torch
+    """返回部署监控所需的所有状态信息。
+
+    这里只做只读探测：任何一项依赖缺失（例如没装 torch）都不能让整个请求失败。
+    """
     import os
-    
-    # CUDA 状态
-    cuda_available = torch.cuda.is_available()
+
+    from app.utils.env_checker import get_cuda_version, get_gpu_name, is_cuda_available
+    from app.utils.nvidia_libs import is_gpu_acceleration_ready
+
+    # 能否真正跑 GPU 转写取决于 CTranslate2 能否加载 cuDNN/cuBLAS。
+    # is_cuda_available() 只看 torch（项目未安装），所以以加速探测结果为主。
+    cuda_available = is_gpu_acceleration_ready() or is_cuda_available()
     cuda_info = {
         "available": cuda_available,
-        "version": torch.version.cuda if cuda_available else None,
-        "gpu_name": torch.cuda.get_device_name(0) if cuda_available else None,
+        "version": get_cuda_version(),
+        "gpu_name": get_gpu_name(),
     }
-    
-    # Whisper 模型状态（从配置文件读取，与前端设置同步）
+
+    # Whisper 模型状态：显示"实际生效"的参数。
+    # 以设置页保存的配置为准（与 transcriber_provider 的选择逻辑一致）。
     transcriber_cfg = transcriber_config_manager.get_config()
     model_size = transcriber_cfg["whisper_model_size"]
     transcriber_type = transcriber_cfg["transcriber_type"]
-    
+
     # FFmpeg 状态
     try:
         ensure_ffmpeg_or_raise()
         ffmpeg_ok = True
-    except:
+    except Exception:
         ffmpeg_ok = False
-    
+
     return R.success(data={
         "backend": {"status": "running", "port": int(os.getenv("BACKEND_PORT", 8483))},
         "cuda": cuda_info,
-        "whisper": {"model_size": model_size, "transcriber_type": transcriber_type},
+        "whisper": {
+            "model_size": model_size,
+            "transcriber_type": transcriber_type,
+            "device": "cuda" if cuda_available else "cpu",
+        },
         "ffmpeg": {"available": ffmpeg_ok},
     })

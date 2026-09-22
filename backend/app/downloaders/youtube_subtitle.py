@@ -5,6 +5,7 @@
 
 from typing import Optional, List
 
+import requests
 from youtube_transcript_api import YouTubeTranscriptApi
 
 from app.models.transcriber_model import TranscriptResult, TranscriptSegment
@@ -16,8 +17,16 @@ logger = get_logger(__name__)
 class YouTubeSubtitleFetcher:
     """通过 youtube-transcript-api 获取 YouTube 字幕。"""
 
-    def __init__(self):
-        self._api = YouTubeTranscriptApi()
+    def __init__(self, cookie: Optional[str] = None):
+        # 带上 Cookie 请求，避免匿名访问被 YouTube 拦截
+        self._api = YouTubeTranscriptApi(http_client=self._build_session(cookie))
+
+    @staticmethod
+    def _build_session(cookie: Optional[str]) -> requests.Session:
+        session = requests.Session()
+        if cookie:
+            session.headers.update({"Cookie": cookie})
+        return session
 
     def fetch_subtitles(
         self,

@@ -9,6 +9,7 @@ from app.downloaders.base import Downloader, DownloadQuality
 from app.downloaders.youtube_subtitle import YouTubeSubtitleFetcher
 from app.models.notes_model import AudioDownloadResult
 from app.models.transcriber_model import TranscriptResult
+from app.services.cookie_manager import CookieConfigManager, write_netscape_cookie_file
 from app.utils.path_helper import get_data_dir
 from app.utils.url_parser import extract_video_id
 
@@ -19,6 +20,19 @@ class YoutubeDownloader(Downloader, ABC):
     def __init__(self):
 
         super().__init__()
+        self._cookie_mgr = CookieConfigManager()
+        self._cookie = self._cookie_mgr.get('youtube')
+        self._cookiefile = write_netscape_cookie_file(self._cookie, '.youtube.com', 'YouTube')
+        if not self._cookie:
+            logger.warning(
+                "YouTube Cookie 未配置，被判定为机器人（Sign in to confirm you're not a bot）时会下载失败"
+            )
+
+    def _apply_cookie(self, ydl_opts: dict) -> dict:
+        """把已配置的 Cookie 注入 yt-dlp 参数；未配置时不注入"""
+        if self._cookiefile:
+            ydl_opts['cookiefile'] = self._cookiefile
+        return ydl_opts
 
     def download(
         self,
@@ -46,12 +60,15 @@ class YoutubeDownloader(Downloader, ABC):
         if skip_download:
             ydl_opts['skip_download'] = True
 
+        self._apply_cookie(ydl_opts)
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=not skip_download)
             video_id = info.get("id")
             title = info.get("title")
             duration = info.get("duration", 0)
             cover_url = info.get("thumbnail")
+            publish_date = info.get("timestamp")
             ext = info.get("ext", "m4a")
             audio_path = os.path.join(output_dir, f"{video_id}.{ext}")
 
@@ -63,6 +80,7 @@ class YoutubeDownloader(Downloader, ABC):
             platform="youtube",
             video_id=video_id,
             raw_info={'tags': info.get('tags')},
+            publish_date=publish_date,
             video_path=None,
         )
 
@@ -91,6 +109,8 @@ class YoutubeDownloader(Downloader, ABC):
             'merge_output_format': 'mp4',  # 确保合并成 mp4
         }
 
+        self._apply_cookie(ydl_opts)
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
             video_id = info.get("id")
@@ -116,7 +136,7 @@ class YoutubeDownloader(Downloader, ABC):
             langs = ['zh-Hans', 'zh', 'zh-CN', 'zh-TW', 'en', 'en-US', 'ja']
 
         video_id = extract_video_id(video_url, "youtube")
-        fetcher = YouTubeSubtitleFetcher()
+        fetcher = YouTubeSubtitleFetcher(cookie=self._cookie)
         print(
             f"尝试获取字幕，video_id={video_id}, langs={langs}"
         )

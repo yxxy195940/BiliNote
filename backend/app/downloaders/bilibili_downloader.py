@@ -1,7 +1,6 @@
 import os
 import json
 import logging
-import tempfile
 from abc import ABC
 from typing import Union, Optional, List
 
@@ -13,7 +12,7 @@ from app.models.notes_model import AudioDownloadResult
 from app.models.transcriber_model import TranscriptResult, TranscriptSegment
 from app.utils.path_helper import get_data_dir
 from app.utils.url_parser import extract_video_id
-from app.services.cookie_manager import CookieConfigManager
+from app.services.cookie_manager import CookieConfigManager, write_netscape_cookie_file
 
 logger = logging.getLogger(__name__)
 
@@ -30,29 +29,15 @@ class BilibiliDownloader(Downloader, ABC):
         if not self._cookie:
             logger.warning("B站 Cookie 未配置，下载可能失败")
             return None
-        lines = ["# Netscape HTTP Cookie File\n"]
-        # 修复分割逻辑，支持不带空格的分号分隔，并进行 strip
-        for pair in self._cookie.split(";"):
-            pair = pair.strip()
-            if "=" in pair:
-                key, value = pair.split("=", 1)
-                # 记录核心 cookie 供调试（不打印 SESSDATA 等敏感值）
-                if key in ("buvid3", "buvid4", "_uuid"):
-                    logger.debug(f"注入 B站 关键 Cookie: {key}")
-                lines.append(f".bilibili.com\tTRUE\t/\tFALSE\t0\t{key}\t{value}\n")
-        
-        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
-        tmp.writelines(lines)
-        tmp.close()
-        logger.info("已生成 B站 Netscape Cookie 文件: %s (条目: %d)", tmp.name, len(lines) - 1)
-        return tmp.name
+        return write_netscape_cookie_file(self._cookie, ".bilibili.com", "B站")
 
     def download(
         self,
         video_url: str,
         output_dir: Union[str, None] = None,
         quality: DownloadQuality = "fast",
-        need_video:Optional[bool]=False
+        need_video: Optional[bool] = False,
+        skip_download: bool = False,
     ) -> AudioDownloadResult:
         if output_dir is None:
             output_dir = get_data_dir()
@@ -86,13 +71,17 @@ class BilibiliDownloader(Downloader, ABC):
         }
         if self._cookiefile:
             ydl_opts['cookiefile'] = self._cookiefile
+        
+        if skip_download:
+            ydl_opts['skip_download'] = True
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=True)
+            info = ydl.extract_info(video_url, download=not skip_download)
             video_id = info.get("id")
             title = info.get("title")
             duration = info.get("duration", 0)
             cover_url = info.get("thumbnail")
+            publish_date = info.get("timestamp")
             audio_path = os.path.join(output_dir, f"{video_id}.mp3")
 
         return AudioDownloadResult(
@@ -103,6 +92,7 @@ class BilibiliDownloader(Downloader, ABC):
             platform="bilibili",
             video_id=video_id,
             raw_info=info,
+            publish_date=publish_date,
             video_path=None  # ❗音频下载不包含视频路径
         )
 
