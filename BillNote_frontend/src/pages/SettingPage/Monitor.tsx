@@ -28,8 +28,8 @@ export default function Monitor() {
             const data = await getDeployStatus()
             setStatus(data)
             setLastUpdated(new Date())
-        } catch (err) {
-            setError('无法连接到后端服务')
+        } catch {
+            setError('无法连接到后端服务，请确认后端已启动后重试')
             setStatus(null)
         } finally {
             setLoading(false)
@@ -56,18 +56,21 @@ export default function Monitor() {
         </Badge>
     )
 
+    // GPU 只要能被识别出来就展示型号：即使现在没启用加速，用户也能看到自己的显卡
+    const cudaDetected = !!status?.cuda.gpu_name
+
     return (
         <ScrollArea className="h-full overflow-y-auto bg-white">
             <div className="container mx-auto px-4 py-8">
                 {/* Header */}
-                <div className="mb-8 flex items-center justify-between">
+                <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h1 className="text-2xl font-bold">部署监控</h1>
                         <p className="text-muted-foreground text-sm">
                             实时监控系统各组件运行状态
                         </p>
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center justify-end gap-4">
                         {lastUpdated && (
                             <span className="text-muted-foreground text-xs">
                                 最后更新: {lastUpdated.toLocaleTimeString()}
@@ -136,7 +139,18 @@ export default function Monitor() {
                                 <Cpu className="mr-2 inline h-5 w-5 text-green-500" />
                                 CUDA GPU
                             </CardTitle>
-                            {status && <StatusBadge ok={status.cuda.available} label={status.cuda.available ? '已启用' : '未启用'} />}
+                            {status && (
+                                <StatusBadge
+                                    ok={status.cuda.available || cudaDetected}
+                                    label={
+                                        status.cuda.available
+                                            ? '已启用'
+                                            : cudaDetected
+                                              ? '已识别'
+                                              : '未启用'
+                                    }
+                                />
+                            )}
                         </CardHeader>
                         <CardContent>
                             {loading && !status ? (
@@ -157,9 +171,25 @@ export default function Monitor() {
                                                 <span className="font-mono">{status.cuda.version}</span>
                                             </div>
                                         </>
+                                    ) : cudaDetected ? (
+                                        <>
+                                            <div className="flex justify-between">
+                                                <span className="text-muted-foreground">GPU:</span>
+                                                <span className="font-medium">{status.cuda.gpu_name}</span>
+                                            </div>
+                                            {status.cuda.version && (
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">CUDA 版本:</span>
+                                                    <span className="font-mono">{status.cuda.version}</span>
+                                                </div>
+                                            )}
+                                            <div className="text-xs text-muted-foreground">
+                                                已识别显卡，当前未启用加速，转写运行在 CPU 模式
+                                            </div>
+                                        </>
                                     ) : (
                                         <div className="text-muted-foreground">
-                                            CUDA 不可用，将使用 CPU 模式
+                                            未检测到可用显卡，将使用 CPU 模式
                                         </div>
                                     )}
                                 </div>
@@ -192,6 +222,14 @@ export default function Monitor() {
                                         <span className="text-muted-foreground">转写引擎:</span>
                                         <span className="font-mono">{status.whisper.transcriber_type}</span>
                                     </div>
+                                    {status.whisper.device && (
+                                        <div className="flex justify-between">
+                                            <span className="text-muted-foreground">运行设备:</span>
+                                            <span className="font-mono uppercase">
+                                                {status.whisper.device}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                             ) : null}
                         </CardContent>

@@ -12,6 +12,7 @@ const platformLabel: Record<string, string> = {
   youtube: 'YouTube',
   douyin: '抖音',
   xiaohongshu: '小红书',
+  text: '文本整理',
 }
 
 export default function VideoBanner({ audioMeta, videoUrl }: VideoBannerProps) {
@@ -27,6 +28,15 @@ export default function VideoBanner({ audioMeta, videoUrl }: VideoBannerProps) {
   const uploader = audioMeta.raw_info?.uploader || ''
   const platform = platformLabel[audioMeta.platform] || audioMeta.platform || ''
   const originalUrl = videoUrl || audioMeta.raw_info?.webpage_url || ''
+  const publishDate = audioMeta.publish_date
+    ? new Date(audioMeta.publish_date * 1000).toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : ''
 
   return (
     <div className="relative mb-4 overflow-hidden rounded-lg">
@@ -63,8 +73,10 @@ export default function VideoBanner({ audioMeta, videoUrl }: VideoBannerProps) {
           </h2>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-white/70">
             {uploader && <span>{uploader}</span>}
-            {uploader && platform && <span className="text-white/40">·</span>}
+            {uploader && (platform || publishDate) && <span className="text-white/40">·</span>}
             {platform && <span>{platform}</span>}
+            {platform && publishDate && <span className="text-white/40">·</span>}
+            {publishDate && <span>发布于 {publishDate}</span>}
           </div>
         </div>
 

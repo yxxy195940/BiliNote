@@ -8,6 +8,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
+  // Tauri 桌面端用 file:// 加载，必须相对路径；Web 部署走 BrowserRouter 深层路由，必须绝对路径
+  const isTauri = mode === 'tauri'
+
   // 在 Docker 环境中，父目录可能没有 .env 文件，使用当前目录
   const envDir = process.env.DOCKER_BUILD ? __dirname : path.resolve(__dirname, '../')
   const env = loadEnv(mode, envDir)
@@ -16,7 +19,7 @@ export default defineConfig(({ mode }) => {
   const port = parseInt(env.VITE_FRONTEND_PORT || '3015', 10)
 
   return {
-    base: './',
+    base: isTauri ? './' : '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

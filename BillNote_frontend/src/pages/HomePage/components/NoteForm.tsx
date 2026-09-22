@@ -4,26 +4,21 @@ import {
   FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form.tsx'
 import { useEffect,useState } from 'react'
+import type { ClipboardEvent } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 
-import { Info, Loader2, Plus } from 'lucide-react'
-import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
+import { Loader2, Plus } from 'lucide-react'
 import { generateNote } from '@/services/note.ts'
 import { uploadFile } from '@/services/upload.ts'
 import { useTaskStore } from '@/store/taskStore'
 import { useModelStore } from '@/store/modelStore'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip.tsx'
+import { resolveModelConfig } from '@/utils/modelConfig'
+import InfoTip from '@/components/InfoTip.tsx'
 import { Checkbox } from '@/components/ui/checkbox.tsx'
 import { ScrollArea } from '@/components/ui/scroll-area.tsx'
 import { Button } from '@/components/ui/button.tsx'
@@ -39,6 +34,10 @@ import { Textarea } from '@/components/ui/textarea.tsx'
 import { noteStyles, noteFormats, videoPlatforms } from '@/constant/note.ts'
 import { fetchModels } from '@/services/model.ts'
 import { useNavigate } from 'react-router-dom'
+import { parseVideoInput } from '@/utils/videoUrl.ts'
+import type { ParsedVideoInput } from '@/utils/videoUrl.ts'
+import { resolveVideoUrl } from '@/utils/videoSource.ts'
+import toast from 'react-hot-toast'
 
 /* -------------------- 校验 Schema -------------------- */
 const formSchema = z
@@ -88,16 +87,7 @@ export type NoteFormValues = z.infer<typeof formSchema>
 const SectionHeader = ({ title, tip }: { title: string; tip?: string }) => (
   <div className="my-3 flex items-center justify-between">
     <h2 className="block">{title}</h2>
-    {tip && (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Info className="hover:text-primary h-4 w-4 cursor-pointer text-neutral-400" />
-          </TooltipTrigger>
-          <TooltipContent className="text-xs">{tip}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    )}
+    {tip && <InfoTip>{tip}</InfoTip>}
   </div>
 )
 
@@ -146,15 +136,53 @@ const NoteForm = () => {
       style: 'minimal',
       video_interval: 6,
       grid_size: [2, 2],
-      format: [],
+      format: ['toc', 'link', 'summary'],
     },
   })
   const currentTask = getCurrentTask()
 
   /* ---- 派生状态（只 watch 一次，提高性能） ---- */
   const platform = useWatch({ control: form.control, name: 'platform' }) as string
-  const videoUnderstandingEnabled = useWatch({ control: form.control, name: 'video_understanding' })
   const editing = currentTask && currentTask.id
+
+  /* ---- 链接自动识别 ---- */
+  // 上一次从「分享文案」里抽出来的结果，仅用于在输入框下方给个反馈
+  const [recognized, setRecognized] = useState<ParsedVideoInput | null>(null)
+
+  const platformLabel = (value: ParsedVideoInput['platform']) =>
+    videoPlatforms.find(p => p.value === (value as string))?.label ?? '视频'
+
+  /** 把识别结果写回表单：链接 + 自动切平台 */
+  const applyParsedInput = (parsed: ParsedVideoInput) => {
+    form.setValue('video_url', parsed.url, { shouldValidate: true, shouldDirty: true })
+    if (parsed.platform && parsed.platform !== form.getValues('platform')) {
+      form.setValue('platform', parsed.platform)
+    }
+    setRecognized(parsed)
+  }
+
+  /**
+   * 粘贴时拦截：拿到的是「【标题】+ 链接」这种分享文案就直接抽链接，
+   * 本来就是一条干净链接则放行走浏览器默认粘贴（保留在中间插入的能力）。
+   */
+  const handleUrlPaste = (e: ClipboardEvent<HTMLInputElement>) => {
+    if (platform === 'local') return
+
+    const parsed = parseVideoInput(e.clipboardData?.getData('text') ?? '')
+    if (!parsed || (!parsed.extracted && parsed.url === parsed.rawUrl)) return
+
+    e.preventDefault()
+    applyParsedInput(parsed)
+  }
+
+  /** 失焦兜底：覆盖拖拽、输入法等绕过 paste 事件的场景，顺手把跟踪参数洗掉 */
+  const handleUrlBlur = () => {
+    if (platform === 'local') return
+
+    const current = form.getValues('video_url') ?? ''
+    const parsed = parseVideoInput(current)
+    if (parsed && (parsed.url !== current || parsed.url !== parsed.rawUrl)) applyParsedInput(parsed)
+  }
 
   const goModelAdd = () => {
     navigate("/settings/model");
@@ -173,7 +201,14 @@ const NoteForm = () => {
 
     form.reset({
       platform: formData.platform || 'bilibili',
-      video_url: formData.video_url || '',
+      // 同步来的笔记 formData 里没有链接，从 audio_meta 里推一条出来，
+      // 否则「重新生成」会被必填校验拦下且看不出原因
+      video_url: resolveVideoUrl({
+        platform: formData.platform,
+        videoId: currentTask.audioMeta?.video_id,
+        rawInfo: currentTask.audioMeta?.raw_info as Record<string, unknown> | null,
+        fallback: formData.video_url,
+      }),
       model_name: formData.model_name || modelList[0]?.model_name || '',
       style: formData.style || 'minimal',
       quality: formData.quality || 'medium',
@@ -218,12 +253,21 @@ const NoteForm = () => {
 
   const onSubmit = async (values: NoteFormValues) => {
     console.log('Not even go here')
+    const resolved = resolveModelConfig({ formData: values }, modelList)
     const payload: NoteFormValues = {
       ...values,
-      provider_id: modelList.find(m => m.model_name === values.model_name)!.provider_id,
+      // 选中的模型可能已经不在启用列表里（比如同步来的笔记），用兜底避免直接崩；
+      // 模型名和供应商要一起取兜底结果，否则会拿 A 供应商去调 B 模型
+      model_name: resolved?.modelName || values.model_name,
+      provider_id: resolved?.providerId || '',
       task_id: currentTaskId || '',
     }
     if (currentTaskId) {
+      // 改了链接就明确告诉用户：这次是按新视频重跑，避免以为还是原来那条
+      const previousUrl = currentTask?.formData?.video_url || ''
+      if (payload.video_url && payload.video_url !== previousUrl) {
+        toast.success(previousUrl ? '视频地址已更新，按新链接重新生成' : '已补上视频链接，开始重新生成')
+      }
       retryTask(currentTaskId, payload)
       return
     }
@@ -234,7 +278,10 @@ const NoteForm = () => {
   }
   const onInvalid = (errors: FieldErrors<NoteFormValues>) => {
     console.warn('表单校验失败：', errors)
-    // message.error('请完善所有必填项后再提交')
+    // 字段错误文案是隐藏的（布局原因），校验失败必须给个 toast，
+    // 否则用户只会看到「点了没反应」—— 同步来的笔记缺链接时最容易踩到
+    const firstError = Object.values(errors).find(Boolean) as { message?: string } | undefined
+    toast.error(firstError?.message || '请检查表单是否填写完整')
   }
   const handleCreateNew = () => {
     // 🔁 这里清空当前任务状态
@@ -284,7 +331,6 @@ const NoteForm = () => {
               render={({ field }) => (
                 <FormItem>
                   <Select
-                    disabled={!!editing}
                     value={field.value}
                     onValueChange={field.onChange}
                     defaultValue={field.value}
@@ -317,10 +363,40 @@ const NoteForm = () => {
                 <FormItem className="flex-1">
                   {platform === 'local' ? (
                     <>
-                      <Input disabled={!!editing} placeholder="请输入本地视频路径" {...field} />
+                      <Input
+                        placeholder={
+                          editing && !field.value
+                            ? '这条笔记没有存路径，填写视频文件路径后即可重新生成'
+                            : '请输入本地视频路径'
+                        }
+                        {...field}
+                      />
                     </>
                   ) : (
-                    <Input disabled={!!editing} placeholder="请输入视频网站链接" {...field} />
+                    <Input
+                      placeholder={
+                        editing && !field.value
+                          ? '这条笔记没有存链接，粘贴原视频链接后即可重新生成'
+                          : '粘贴视频链接，或直接粘贴 App 的分享文案'
+                      }
+                      {...field}
+                      onChange={e => {
+                        // 重新编辑就撤掉上一次的识别反馈
+                        setRecognized(null)
+                        field.onChange(e)
+                      }}
+                      onPaste={handleUrlPaste}
+                      onBlur={e => {
+                        field.onBlur(e)
+                        handleUrlBlur()
+                      }}
+                    />
+                  )}
+                  {recognized && platform !== 'local' && (
+                    <p className="text-muted-foreground text-xs">
+                      已识别 {platformLabel(recognized.platform)}
+                      {recognized.title ? `：${recognized.title}` : ' 链接'}
+                    </p>
                   )}
                   <FormMessage style={{ display: 'none' }} />
                 </FormItem>
@@ -451,88 +527,21 @@ const NoteForm = () => {
               )}
             />
           </div>
-          {/* 视频理解 */}
-          <SectionHeader title="视频理解" tip="将视频截图发给多模态模型辅助分析" />
-          <div className="flex flex-col gap-2">
-            <FormField
-              control={form.control}
-              name="video_understanding"
-              render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center gap-2">
-                    <FormLabel>启用</FormLabel>
-                    <Checkbox
-                      checked={videoUnderstandingEnabled}
-                      onCheckedChange={v => form.setValue('video_understanding', v)}
-                    />
-                  </div>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <div className="grid grid-cols-2 gap-4">
-              {/* 采样间隔 */}
-              <FormField
-                control={form.control}
-                name="video_interval"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>采样间隔（秒）</FormLabel>
-                    <Input disabled={!videoUnderstandingEnabled} type="number" {...field} />
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              {/* 拼图大小 */}
-              <FormField
-                control={form.control}
-                name="grid_size"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>拼图尺寸（列 × 行）</FormLabel>
-                    <div className="flex items-center space-x-2">
-                      <Input
-                        disabled={!videoUnderstandingEnabled}
-                        type="number"
-                        value={field.value?.[0] || 3}
-                        onChange={e => field.onChange([+e.target.value, field.value?.[1] || 3])}
-                        className="w-16"
-                      />
-                      <span>x</span>
-                      <Input
-                        disabled={!videoUnderstandingEnabled}
-                        type="number"
-                        value={field.value?.[1] || 3}
-                        onChange={e => field.onChange([field.value?.[0] || 3, +e.target.value])}
-                        className="w-16"
-                      />
-                    </div>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            <Alert variant="warning" className="text-sm">
-              <AlertDescription>
-                <strong>提示：</strong>视频理解功能必须使用多模态模型。
-              </AlertDescription>
-            </Alert>
-          </div>
-
           {/* 笔记格式 */}
           <FormField
             control={form.control}
             name="format"
             render={({ field }) => (
               <FormItem>
-                <SectionHeader title="笔记格式" tip="选择要包含的笔记元素" />
+                <SectionHeader
+                  title="笔记格式"
+                  tip="原片截图会在各章节内自动截取对应时间点的画面（需下载完整视频）"
+                />
                 <CheckboxGroup
                   value={field.value}
                   onChange={field.onChange}
                   disabledMap={{
                     link: platform === 'local',
-                    screenshot: !videoUnderstandingEnabled,
                   }}
                 />
                 <FormMessage />

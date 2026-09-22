@@ -18,6 +18,8 @@ export interface MarkmapEditorProps {
   height?: string
   /** 文档标题，用于导出HTML时的文件名 */
   title?: string
+  /** 移动端使用明确的可视高度，避免父容器无高度时 SVG 被压缩 */
+  isMobile?: boolean
 }
 
 export default function MarkmapEditor({
@@ -27,6 +29,7 @@ export default function MarkmapEditor({
   customButtons = [],
   height = '600px',
   title = 'mindmap',
+  isMobile = false,
 }: MarkmapEditorProps) {
   const svgRef = useRef<SVGSVGElement>(null)
   const mmRef = useRef<Markmap | undefined>()
@@ -472,14 +475,16 @@ export default function MarkmapEditor({
         {isFullscreen ? (
           <button
             onClick={exitFullscreen}
-            className="rounded p-1 hover:bg-gray-200"
+            className="flex items-center gap-1 rounded border bg-white px-2 py-1 text-xs shadow-sm hover:bg-gray-100"
             title="退出全屏"
           >
-            🗗
+            <span aria-hidden="true">↙</span>
+            退出全屏
           </button>
         ) : (
-          <button onClick={enterFullscreen} className="rounded p-1 hover:bg-gray-200" title="全屏">
-            🗖
+          <button onClick={enterFullscreen} className="flex items-center gap-1 rounded border bg-white px-2 py-1 text-xs shadow-sm hover:bg-gray-100" title="全屏展示">
+            <span aria-hidden="true">↗</span>
+            全屏展示
           </button>
         )}
       </div>
@@ -488,7 +493,11 @@ export default function MarkmapEditor({
       {/* <textarea value={value} onChange={handleChange} className="mb-2 p-2 border rounded" /> */}
 
       {/* 思维导图区 */}
-      <svg ref={svgRef} className="w-full flex-1" style={{ height, overflow: 'auto' }} />
+      <svg
+        ref={svgRef}
+        className={isMobile ? 'w-full' : 'w-full flex-1'}
+        style={{ height, minHeight: isMobile ? '70vh' : undefined, overflow: 'auto' }}
+      />
 
       {/* 如果你还想保留 markmap-toolbar */}
       {/* <div ref={toolbarRef} className="absolute right-2 bottom-2 z-10" /> */}

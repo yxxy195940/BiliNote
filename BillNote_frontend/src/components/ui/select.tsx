@@ -4,8 +4,19 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 
-function Select({ ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />
+function Select({ onValueChange, ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
+  // Radix 在 <form> 内部会额外渲染一个隐藏的原生 <select> 用于表单回填，
+  // 部分浏览器（夸克内核、以及 Chrome 在某些加载时序下）在选项列表变化时会补发一次 value="" 的 change 事件，
+  // 经 onValueChange 透传会把表单里已经选好的值清空（表现为下拉框显示为空或占位符）。这里统一忽略空值。
+  const handleValueChange = React.useCallback(
+    (value: string) => {
+      if (value === '') return
+      onValueChange?.(value)
+    },
+    [onValueChange]
+  )
+
+  return <SelectPrimitive.Root data-slot="select" {...props} onValueChange={handleValueChange} />
 }
 
 function SelectGroup({ ...props }: React.ComponentProps<typeof SelectPrimitive.Group>) {

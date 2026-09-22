@@ -7,6 +7,37 @@ html, body, #root {
   overflow: hidden;
 }
 
+@media (max-width: 767px) {
+  html,
+  body,
+  #root {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  body {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  [data-slot='scroll-area'] {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  [data-slot='scroll-area-viewport'] {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  [data-slot='scroll-area-scrollbar'] {
+    display: none !important;
+  }
+}
+
 /* 修改滚动条轨道颜色 */
 ::-webkit-scrollbar {
   width: 8px; /* 控制滚动条的宽度 */
@@ -145,4 +176,32 @@ html, body, #root {
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* ---------------------------------------------------------------
+   Radix ScrollArea 的内容层默认是 display:table，宽度按内容撑开。
+   这会导致"不换行的长标题 / 宽表格 / 长代码行"把容器撑得比屏幕还宽，
+   手机上就只能看到左边一部分。
+   改成 block 后，内容宽度受限于容器（即屏幕），宽内容自己内部横向滚动。
+   --------------------------------------------------------------- */
+[data-slot='scroll-area-viewport'] > div {
+  display: block !important;
+}
+
+/* markdown 正文里的宽内容：不撑破容器，改为自身内部滚动 */
+.markdown-body table,
+.markdown-body pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 长链接等不可断词的字符串，避免撑破行宽 */
+.markdown-body a,
+.markdown-body p,
+.markdown-body li {
+  overflow-wrap: anywhere;
 }

@@ -89,7 +89,7 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
               className={cn('flex items-center gap-4')}
             >
               {/* 封面图 */}
-              {task.platform === 'local' ? (
+              {task.platform === 'local' || task.platform === 'text' ? (
                 <img
                   src={
                     task.audioMeta.cover_url ? `${task.audioMeta.cover_url}` : '/placeholder.png'
@@ -124,6 +124,11 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
+                {task.platform === 'text' && (
+                  <span className="shrink-0 rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-600">
+                    文本整理
+                  </span>
+                )}
               </div>
             </div>
             <div className={'mt-2 flex items-center justify-between text-[10px]'}>
@@ -176,6 +181,16 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
               {/*  {task.status === 'FAILED' && <Badge variant="destructive">失败</Badge>}*/}
               {/*</div>*/}
             </div>
+
+            {task.status === 'FAILED' && (
+              <p
+                className="mt-1 line-clamp-2 text-[10px] break-all text-red-500"
+                title={task.message}
+              >
+                {task.phaseDesc ? `${task.phaseDesc}：` : ''}
+                {task.message || '生成失败，请重试'}
+              </p>
+            )}
           </div>
         ))}
       </div>

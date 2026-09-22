@@ -49,7 +49,14 @@ const TranscriptViewer = () => {
       .map(s => `[${formatTime(s.start)}] ${s.text}`)
       .join('\n')
       
-    const fileName = `${task.audioMeta?.title || 'transcript'}_原文.txt`
+    const name = task.audioMeta?.title || 'transcript'
+    const publishDate = (task.audioMeta as any)?.publish_date
+      ? new Date((task.audioMeta as any).publish_date * 1000)
+          .toISOString()
+          .split('T')[0]
+          .replace(/-/g, '')
+      : ''
+    const fileName = publishDate ? `${publishDate}_${name}_原文.txt` : `${name}_原文.txt`
     const blob = new Blob([fullText], { type: 'text/plain;charset=utf-8' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)

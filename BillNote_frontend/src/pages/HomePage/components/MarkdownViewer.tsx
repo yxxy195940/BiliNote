@@ -17,7 +17,7 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import 'github-markdown-css/github-markdown-light.css'
 import { ScrollArea } from '@/components/ui/scroll-area.tsx'
-import { useTaskStore } from '@/store/taskStore'
+import { taskFailureText, useTaskStore } from '@/store/taskStore'
 import { noteStyles } from '@/constant/note.ts'
 import { MarkdownHeader } from '@/pages/HomePage/components/MarkdownHeader.tsx'
 import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
@@ -25,6 +25,8 @@ import MarkmapEditor from '@/pages/HomePage/components/MarkmapComponent.tsx'
 import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
 import { MarkdownOutline } from '@/components/MarkdownOutline.tsx'
+import { useIsMobile } from '@/hooks/useIsMobile.ts'
+import { copyToClipboard } from '@/utils/clipboard.ts'
 
 interface VersionNote {
   ver_id: string
@@ -224,9 +226,13 @@ function createMarkdownComponents(baseURL: string) {
             <div className="bg-muted text-muted-foreground flex items-center justify-between px-4 py-1.5 text-sm font-medium">
               <div>{match[1].toUpperCase()}</div>
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(codeContent)
-                  toast.success('代码已复制')
+                onClick={async () => {
+                  const succeeded = await copyToClipboard(codeContent)
+                  if (succeeded) {
+                    toast.success('代码已复制')
+                  } else {
+                    toast.error('复制失败，请长按选择代码手动复制')
+                  }
                 }}
                 className="bg-background/80 hover:bg-background flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors"
               >
@@ -309,6 +315,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
   const [viewMode, setViewMode] = useState<'map' | 'preview'>('preview')
   const svgRef = useRef<SVGSVGElement>(null)
+  const isMobile = useIsMobile()
 
   // 缓存 ReactMarkdown components，仅在 baseURL 变化时重建
   const markdownComponents = useMemo(() => createMarkdownComponents(baseURL), [baseURL])
@@ -345,14 +352,14 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     }
   }, [currentVerId, currentTask?.id])
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(selectedContent)
-      setCopied(true)
-      toast.success('已复制到剪贴板')
-      setTimeout(() => setCopied(false), 2000)
-    } catch (e) {
-      toast.error('复制失败')
+    const succeeded = await copyToClipboard(selectedContent)
+    if (!succeeded) {
+      toast.error('复制失败，请长按选择文本手动复制')
+      return
     }
+    setCopied(true)
+    toast.success('已复制到剪贴板')
+    setTimeout(() => setCopied(false), 2000)
   }
   const alertButton = {
     id: 'alert',
@@ -384,10 +391,30 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const handleDownload = () => {
     const task = getCurrentTask()
     const name = task?.audioMeta.title || 'note'
-    const blob = new Blob([selectedContent], { type: 'text/markdown;charset=utf-8' })
+    const publishDate = task?.audioMeta.publish_date
+      ? new Date(task.audioMeta.publish_date * 1000)
+          .toISOString()
+          .split('T')[0]
+          .replace(/-/g, '')
+      : ''
+    const filename = publishDate ? `${publishDate}_${name}` : name
+
+    // 转换相对路径为绝对路径，确保导出的 MD 文件在外部编辑器中也能看到图片
+    let finalContent = selectedContent
+    if (typeof finalContent === 'string') {
+      // 匹配 ![](/static/...) 或 ![](static/...) 或 ![](/uploads/...) 等
+      finalContent = finalContent.replace(
+        /(!\[.*?\]\()(\/(?:static|uploads)\/.*?)\)/g,
+        (match, prefix, path) => {
+          return `${prefix}${baseURL}${path})`
+        }
+      )
+    }
+
+    const blob = new Blob([finalContent], { type: 'text/markdown;charset=utf-8' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
-    link.download = `${name}.md`
+    link.download = `${filename}.md`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -395,7 +422,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
 
   if (status === 'loading') {
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center space-y-4 text-neutral-500">
+      <div className="flex h-full w-full flex-col items-center justify-center space-y-4 text-neutral-500">
         <StepBar steps={steps} currentStep={taskStatus} />
         <Loading className="h-5 w-5" />
         <div className="text-center text-sm">
@@ -408,7 +435,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
 
   if (status === 'idle') {
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center space-y-3 text-neutral-500">
+      <div className="flex h-full w-full flex-col items-center justify-center space-y-3 text-neutral-500">
         <Idle />
         <div className="text-center">
           <p className="text-lg font-bold">输入视频链接并点击"生成笔记"</p>
@@ -419,14 +446,21 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   }
 
   if (status === 'failed' && !isMultiVersion) {
+    const failure = taskFailureText(currentTask)
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center gap-4 space-y-3">
+      <div className="flex h-full w-full flex-col items-center justify-center gap-4 space-y-3 px-4">
         <Error />
-        <div className="text-center">
-          <p className="text-lg font-bold text-red-500">笔记生成失败</p>
-          <p className="mt-2 mb-2 text-xs text-red-400">请检查后台或稍后再试</p>
+        <div className="w-full max-w-2xl text-center">
+          <p className="text-lg font-bold text-red-500">{failure.title}</p>
+          {failure.message ? (
+            <pre className="mt-3 max-h-56 overflow-auto rounded-md bg-red-50 p-3 text-left text-xs whitespace-pre-wrap text-red-600">
+              {failure.message}
+            </pre>
+          ) : (
+            <p className="mt-2 mb-2 text-xs text-red-400">请检查后台或稍后再试</p>
+          )}
 
-          <Button onClick={() => retryTask(currentTask.id)} size="lg">
+          <Button className="mt-4" onClick={() => retryTask(currentTask.id)} size="lg">
             重试
           </Button>
         </div>
@@ -435,7 +469,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   }
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden">
+    <div className={isMobile ? 'flex w-full flex-col overflow-visible' : 'flex h-full w-full flex-col overflow-hidden'}>
       <MarkdownHeader
         currentTask={currentTask}
         isMultiVersion={isMultiVersion}
@@ -453,30 +487,42 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         setShowChat={setShowChat}
         viewMode={viewMode}
         setViewMode={setViewMode}
+        isMobile={isMobile}
       />
 
       {viewMode === 'map' ? (
-        <div className="flex w-full flex-1 overflow-hidden bg-white">
+        <div className={isMobile ? 'w-full overflow-visible bg-white' : 'flex w-full flex-1 overflow-hidden bg-white'}>
           <div className={'w-full'}>
             <MarkmapEditor
               value={selectedContent}
               onChange={() => {}}
-              height="100%" // 根据需求可以设定百分比或固定高度
+              height={isMobile ? '70vh' : '100%'}
               title={currentTask?.audioMeta?.title || '思维导图'}
+              isMobile={isMobile}
             />
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden bg-white py-2">
+        <div className={isMobile ? 'bg-white py-2' : 'flex flex-1 overflow-hidden bg-white py-2'}>
           {selectedContent && selectedContent !== 'loading' && selectedContent !== 'empty' ? (
             <>
               {showChat === 'full' && currentTask ? (
                 <div className="h-full w-full">
                   <ChatPanel taskId={currentTask.id} mode="full" onModeChange={setShowChat} />
                 </div>
+              ) : isMobile && (showTranscribe || (showChat === 'half' && currentTask)) ? (
+                /* 手机屏幕放不下并排面板：原文参照 / AI 问答 独占内容区，
+                   顶栏按钮用蓝底高亮表示当前处于哪个模式，再点一次即可返回笔记 */
+                <div className="h-full w-full min-w-0">
+                  {showTranscribe ? (
+                    <TranscriptViewer />
+                  ) : currentTask ? (
+                    <ChatPanel taskId={currentTask.id} mode="half" onModeChange={setShowChat} />
+                  ) : null}
+                </div>
               ) : (
               <>
-              <ScrollArea className="min-w-0 flex-1 relative">
+              <ScrollArea className={isMobile ? 'relative w-full min-w-0' : 'relative min-w-0 flex-1'}>
                 <MarkdownOutline markdown={selectedContent} />
                 <div className="px-2">
                   <VideoBanner
@@ -495,7 +541,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                 </div>
               </ScrollArea>
               {showTranscribe && (
-                <div className={'ml-2 w-2/4'}>
+                <div className="ml-2 w-2/4">
                   <TranscriptViewer />
                 </div>
               )}

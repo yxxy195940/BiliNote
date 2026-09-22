@@ -9,6 +9,8 @@ import { toast } from 'react-hot-toast'
 import { useChatStore } from '@/store/chatStore'
 import { useTaskStore } from '@/store/taskStore'
 import { askQuestion, getChatStatus, indexTask, type ChatSource, type IndexStatus } from '@/services/chat'
+import { useModelStore } from '@/store/modelStore'
+import { resolveModelConfig } from '@/utils/modelConfig'
 
 type ChatMode = 'half' | 'full'
 
@@ -57,12 +59,20 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
   const addMessage = useChatStore(state => state.addMessage)
   const clearChat = useChatStore(state => state.clearChat)
 
-  const currentTaskId = useTaskStore(state => state.currentTaskId)
   const tasks = useTaskStore(state => state.tasks)
   const currentTask = useMemo(
-    () => tasks.find(t => t.id === currentTaskId) ?? null,
-    [tasks, currentTaskId],
+    // 按面板自己的 taskId 找，而不是 store 里的 currentTaskId，避免两者不同步时用错笔记
+    () => tasks.find(t => t.id === taskId) ?? null,
+    [tasks, taskId],
   )
+
+  const modelList = useModelStore(state => state.modelList)
+  const loadEnabledModels = useModelStore(state => state.loadEnabledModels)
+
+  // 同步来的笔记 formData 里没有供应商，兜底要靠已启用模型列表，所以这里补一次加载
+  useEffect(() => {
+    loadEnabledModels()
+  }, [loadEnabledModels])
 
   // 检查索引状态，未索引时自动触发，indexing 时轮询
   useEffect(() => {
@@ -103,12 +113,13 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
       const question = value.trim()
       if (!question || loading) return
 
-      const providerId = currentTask?.formData?.provider_id
-      const modelName = currentTask?.formData?.model_name
-      if (!providerId || !modelName) {
-        toast.error('无法获取模型配置，请确认任务已完成')
+      // 任务自带配置 → 模型名反查 → 供应商反查 → 模型列表第一项
+      const resolved = resolveModelConfig(currentTask, modelList)
+      if (!resolved) {
+        toast.error('没有可用模型，请到设置页添加并启用模型')
         return
       }
+      const { providerId, modelName } = resolved
 
       addMessage(taskId, { role: 'user', content: question })
       setInput('')
@@ -134,7 +145,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
         setLoading(false)
       }
     },
-    [loading, taskId, currentTask, messages, addMessage],
+    [loading, taskId, currentTask, modelList, messages, addMessage],
   )
 
   // 转换为 Bubble.List 的数据格式
@@ -230,7 +241,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
   }
 
   return (
-    <div className="flex h-full flex-col border-l">
+    <div className="flex h-full flex-col border-l max-md:border-l-0">
       {/* 头部 */}
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="text-sm font-medium">AI 问答</span>

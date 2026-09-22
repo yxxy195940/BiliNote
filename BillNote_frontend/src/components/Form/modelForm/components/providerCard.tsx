@@ -46,16 +46,16 @@ const ProviderCard: FC<IProviderCardProps> = ({
       }
     >
       <div
-        className="flex items-center text-lg"
+        className="flex min-w-0 items-center text-lg"
         onClick={() => navigate(`/settings/model/${id}`)}
       >
-        <div className="flex h-9 w-9 items-center">
+        <div className="flex h-9 w-9 shrink-0 items-center">
           <AILogo name={Icon} />
         </div>
-        <div className="font-semibold">{providerName}</div>
+        <div className="truncate font-semibold">{providerName}</div>
       </div>
 
-      <div>
+      <div className="shrink-0 pl-2">
         <Switch
           checked={isChecked}
           onCheckedChange={handleToggle}

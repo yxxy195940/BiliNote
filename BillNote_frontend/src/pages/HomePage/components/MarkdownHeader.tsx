@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Copy, Download, BrainCircuit, MessageSquare } from 'lucide-react'
+import { Copy, Download, BrainCircuit, MessageSquare, FileText, ScrollText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -30,6 +30,9 @@ interface NoteHeaderProps {
   setShowTranscribe: (show: boolean) => void
   showChat?: false | 'half' | 'full'
   setShowChat?: (mode: false | 'half' | 'full') => void
+  viewMode: 'map' | 'preview'
+  setViewMode: (mode: 'map' | 'preview') => void
+  isMobile?: boolean
 }
 
 export function MarkdownHeader({
@@ -49,6 +52,7 @@ export function MarkdownHeader({
   setShowChat,
   viewMode,
   setViewMode,
+  isMobile,
 }: NoteHeaderProps) {
   const [copied, setCopied] = useState(false)
 
@@ -86,10 +90,40 @@ export function MarkdownHeader({
       .replace(/\//g, '-')
   }
 
+  // 手机上「原文参照」和「AI 问答」都是切换逻辑：按钮蓝底 = 当前正在看的内容，
+  // 再点一次回到 Markdown 笔记；两个面板互斥，打开一个会自动收起另一个。
+  const transcriptActive = viewMode === 'preview' && showTranscribe
+  const chatActive = viewMode === 'preview' && !!showChat
+  // 手机上原文参照 / AI 问答 会盖住笔记本身，所以同一时刻只让一个按钮蓝底：
+  // 面板打开时 Markdown 按钮不再是「当前内容」，点它就直接回到笔记。
+  const markdownActive = viewMode === 'preview' && !(isMobile && (showTranscribe || !!showChat))
+
+  const showMarkdown = () => {
+    setViewMode('preview')
+    if (isMobile) {
+      setShowTranscribe(false)
+      setShowChat?.(false)
+    }
+  }
+
+  const toggleTranscribe = () => {
+    const next = !transcriptActive
+    setViewMode('preview')
+    setShowTranscribe(next)
+    setShowChat?.(false)
+  }
+
+  const toggleChat = () => {
+    const next = !chatActive
+    setViewMode('preview')
+    setShowChat?.(next ? 'half' : false)
+    setShowTranscribe(false)
+  }
+
   return (
-    <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b bg-white/95 px-4 py-2 backdrop-blur-sm">
+    <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b bg-white/95 px-2 py-2 backdrop-blur-sm md:gap-3 md:px-4">
       {/* 左侧区域：版本 + 标签 + 创建时间 */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2 md:gap-3">
         {isMultiVersion && (
           <Select value={currentVerId} onValueChange={setCurrentVerId}>
             <SelectTrigger className="h-8 w-[160px] text-sm">
@@ -122,25 +156,44 @@ export function MarkdownHeader({
         </Badge>
 
         {createAt && (
-          <div className="text-muted-foreground text-sm">创建时间: {formatDate(createAt)}</div>
+          <div className="text-muted-foreground hidden text-sm md:block">
+            创建时间: {formatDate(createAt)}
+          </div>
         )}
       </div>
 
       {/* 右侧操作按钮 */}
       <div className="flex items-center gap-1">
+        {/* 视图切换：Markdown 笔记 / 思维导图 二选一，当前视图用蓝底高亮 */}
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                onClick={() => {
-                  setViewMode(viewMode == 'preview' ? 'map' : 'preview')
-                }}
-                variant="ghost"
+                onClick={showMarkdown}
+                variant={markdownActive ? 'default' : 'ghost'}
                 size="sm"
                 className="h-8 px-2"
+                aria-pressed={markdownActive}
               >
-                <BrainCircuit className="mr-1.5 h-4 w-4" />
-                <span className="text-sm">{viewMode == 'preview' ? '思维导图' : 'markdown'}</span>
+                <FileText className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden text-sm sm:inline">Markdown</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Markdown 笔记</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={() => setViewMode('map')}
+                variant={viewMode === 'map' ? 'default' : 'ghost'}
+                size="sm"
+                className="h-8 px-2"
+                aria-pressed={viewMode === 'map'}
+              >
+                <BrainCircuit className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden text-sm sm:inline">思维导图</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>思维导图</TooltipContent>
@@ -150,8 +203,8 @@ export function MarkdownHeader({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button onClick={handleCopy} variant="ghost" size="sm" className="h-8 px-2">
-                <Copy className="mr-1.5 h-4 w-4" />
-                <span className="text-sm">{copied ? '已复制' : '复制'}</span>
+                <Copy className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden text-sm sm:inline">{copied ? '已复制' : '复制'}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>复制内容</TooltipContent>
@@ -162,8 +215,8 @@ export function MarkdownHeader({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button onClick={onDownload} variant="ghost" size="sm" className="h-8 px-2">
-                <Download className="mr-1.5 h-4 w-4" />
-                <span className="text-sm">导出 Markdown</span>
+                <Download className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden text-sm sm:inline">导出 Markdown</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>下载为 Markdown 文件</TooltipContent>
@@ -173,15 +226,14 @@ export function MarkdownHeader({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                onClick={() => {
-                  setShowTranscribe(!showTranscribe)
-                }}
-                variant="ghost"
+                onClick={toggleTranscribe}
+                variant={transcriptActive ? 'default' : 'ghost'}
                 size="sm"
                 className="h-8 px-2"
+                aria-pressed={transcriptActive}
               >
-                {/*<Download className="mr-1.5 h-4 w-4" />*/}
-                <span className="text-sm">原文参照</span>
+                <ScrollText className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden text-sm sm:inline">原文参照</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>原文参照</TooltipContent>
@@ -192,13 +244,14 @@ export function MarkdownHeader({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  onClick={() => setShowChat(showChat ? false : 'half')}
-                  variant={showChat ? 'default' : 'ghost'}
+                  onClick={toggleChat}
+                  variant={chatActive ? 'default' : 'ghost'}
                   size="sm"
                   className="h-8 px-2"
+                  aria-pressed={chatActive}
                 >
-                  <MessageSquare className="mr-1.5 h-4 w-4" />
-                  <span className="text-sm">AI 问答</span>
+                  <MessageSquare className="h-4 w-4 sm:mr-1.5" />
+                  <span className="hidden text-sm sm:inline">AI 问答</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>基于笔记内容的 AI 问答</TooltipContent>

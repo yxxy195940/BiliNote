@@ -17,6 +17,7 @@ export interface DeployStatus {
   whisper: {
     model_size: string
     transcriber_type: string
+    device?: string
   }
   ffmpeg: {
     available: boolean
